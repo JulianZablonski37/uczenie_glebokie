@@ -24,11 +24,10 @@ import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
-from dataclasses import dataclass, field
-from typing import Optional
 
 import datasets
 import numpy as np
+import torch
 from datasets import load_dataset
 
 import evaluate
@@ -53,21 +52,7 @@ from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
 
-from roberta import RobertaClassificationHeadCustom
-from gpt2 import  GPT2ForSequenceClassificationCustom
 
-MODEL_NAME_TO_CLASS = {
-'roberta_simple': RobertaClassificationHeadCustom,
-'gpt2_hidden': GPT2ForSequenceClassificationCustom,
-}
-
-custom_model: str = field(
-        default=None,
-        metadata={
-            "help": "Use custom implementation from available list",
-            "choices": list(MODEL_NAME_TO_CLASS.keys()),
-        },
-    )
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.23.0")
 
@@ -77,6 +62,9 @@ logger = logging.getLogger(__name__)
 
 # A list of all multilingual tokenizer which require src_lang and tgt_lang attributes.
 MULTILINGUAL_TOKENIZERS = [MBartTokenizer, MBartTokenizerFast, MBart50Tokenizer, MBart50TokenizerFast, M2M100Tokenizer]
+
+
+MAP_CLASSIFICATION_LABEL = {'positive': 1, 'negative': 0}
 
 
 @dataclass
@@ -114,6 +102,10 @@ class ModelArguments:
                 "with private models)."
             )
         },
+    )
+    freeze_weights: bool = field(
+        default=False,
+        metadata={"help": "Freeze encoder weights"},
     )
 
 
@@ -265,6 +257,11 @@ class DataTrainingArguments:
             self.val_max_target_length = self.max_target_length
 
 
+def freeze_model_weights(model: torch.nn.Module) -> None:
+    for param in model.parameters():
+        param.requires_grad = False
+
+
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
@@ -388,39 +385,18 @@ def main():
         revision=model_args.model_revision,
         use_auth_token=True if model_args.use_auth_token else None,
     )
-    # model = AutoModelForSeq2SeqLM.from_pretrained(
-    #     model_args.model_name_or_path,
-    #     from_tf=bool(".ckpt" in model_args.model_name_or_path),
-    #     config=config,
-    #     cache_dir=model_args.cache_dir,
-    #     revision=model_args.model_revision,
-    #     use_auth_token=True if model_args.use_auth_token else None,
-    # )
-    custom_model = model_args.custom_model
-    if custom_model is not None:
-      # Check model and implementation is the same
-      if 'roberta' in custom_model and 'roberta' not in model_args.model_name_or_path:
-          raise RuntimeError('Model and custom implementation should be the same type: RoBERTa')
-      elif 'gpt2' in custom_model and 'gpt2' not in model_args.model_name_or_path:
-          raise RuntimeError('Model and custom implementation should be the same type: GPT-2')
-
-      # Set custom configuration in model configuration
-      config.use_hidden_states = 'hidden' in custom_model
-      logger.info(f'Using hidden states in model: {config.use_hidden_states}')
-
-      # Get class to initialize model
-      model_cls = MODEL_NAME_TO_CLASS[custom_model]
-    else:
-      model_cls = AutoModelForSequenceClassification
-    logger.info(f'Using implementation from class: {model_cls.__name__}')
-    model = model_cls.from_pretrained(
+    model = AutoModelForSeq2SeqLM.from_pretrained(
         model_args.model_name_or_path,
         from_tf=bool(".ckpt" in model_args.model_name_or_path),
         config=config,
         cache_dir=model_args.cache_dir,
         revision=model_args.model_revision,
-        use_auth_token=True if model_args.use_auth_token else None
-        )
+        use_auth_token=True if model_args.use_auth_token else None,
+    )
+
+    if model_args.freeze_weights:
+        logger.info("Freezing encoder weights")
+        freeze_model_weights(model.encoder)
 
     model.resize_token_embeddings(len(tokenizer))
 
@@ -435,6 +411,13 @@ def main():
         raise ValueError("Make sure that `config.decoder_start_token_id` is correctly defined")
 
     prefix = data_args.source_prefix if data_args.source_prefix is not None else ""
+    if 'classification' not in prefix:
+        raise RuntimeError('Not found "classification" prefix!')
+    prefix = prefix.strip()
+    if not prefix.endswith(':'):
+        prefix += ':'
+    prefix += ' '
+    logger.info(f'Using translation prefix: "{prefix}"')
 
     # Preprocessing the datasets.
     # We need to tokenize inputs and targets.
@@ -456,8 +439,8 @@ def main():
             "--target_lang arguments."
         )
 
-        tokenizer.src_lang = data_args.source_lang
-        tokenizer.tgt_lang = data_args.target_lang
+        tokenizer.src_lang = 'text'
+        tokenizer.tgt_lang = 'label'
 
         # For multilingual translation models like mBART-50 and M2M100 we need to force the target language token
         # as the first generated token. We ask the user to explicitly provide this as --forced_bos_token argument.
@@ -467,8 +450,8 @@ def main():
         model.config.forced_bos_token_id = forced_bos_token_id
 
     # Get the language codes for input/target.
-    source_lang = data_args.source_lang.split("_")[0]
-    target_lang = data_args.target_lang.split("_")[0]
+    source_lang = 'text'
+    target_lang = 'label'
 
     # Temporarily set max_target_length for training.
     max_target_length = data_args.max_target_length
@@ -481,8 +464,8 @@ def main():
         )
 
     def preprocess_function(examples):
-        inputs = [ex[source_lang] for ex in examples["translation"]]
-        targets = [ex[target_lang] for ex in examples["translation"]]
+        inputs = [ex for ex in examples[source_lang]]
+        targets = [ex for ex in examples[target_lang]]
         inputs = [prefix + inp for inp in inputs]
         model_inputs = tokenizer(inputs, max_length=data_args.max_source_length, padding=padding, truncation=True)
 
@@ -523,7 +506,16 @@ def main():
         eval_dataset = raw_datasets["validation"]
         if data_args.max_eval_samples is not None:
             max_eval_samples = min(len(eval_dataset), data_args.max_eval_samples)
-            eval_dataset = eval_dataset.select(range(max_eval_samples))
+            label_to_indexes = defaultdict(list)
+            for index, eval_sample in enumerate(eval_dataset):
+                label_to_indexes[eval_sample['label']].append(index)
+            max_samples_per_label = int(max_eval_samples / len(label_to_indexes))
+            eval_sample_indexes = []
+            for label, indexes in label_to_indexes.items():
+                eval_sample_indexes.extend(indexes[:max_samples_per_label])
+                logger.info(f"Set {max_samples_per_label} samples for {label}-class")
+            eval_sample_indexes.sort()
+            eval_dataset = eval_dataset.select(eval_sample_indexes)
         with training_args.main_process_first(desc="validation dataset map pre-processing"):
             eval_dataset = eval_dataset.map(
                 preprocess_function,
@@ -566,6 +558,7 @@ def main():
 
     # Metric
     metric = evaluate.load("sacrebleu")
+    metric_accuracy = evaluate.load("accuracy")
 
     def postprocess_text(preds, labels):
         preds = [pred.strip() for pred in preds]
@@ -585,9 +578,12 @@ def main():
 
         # Some simple post-processing
         decoded_preds, decoded_labels = postprocess_text(decoded_preds, decoded_labels)
+        decoded_preds_accuracy = [MAP_CLASSIFICATION_LABEL.get(decoded_pred, -1) for decoded_pred in decoded_preds]
+        decoded_labels_accuracy = [MAP_CLASSIFICATION_LABEL.get(decoded_label[0], -1) for decoded_label in decoded_labels]
 
         result = metric.compute(predictions=decoded_preds, references=decoded_labels)
-        result = {"bleu": result["score"]}
+        result_accuracy = metric_accuracy.compute(predictions=decoded_preds_accuracy, references=decoded_labels_accuracy)
+        result = {"bleu": result["score"], "accuracy": result_accuracy["accuracy"]}
 
         prediction_lens = [np.count_nonzero(pred != tokenizer.pad_token_id) for pred in preds]
         result["gen_len"] = np.mean(prediction_lens)
