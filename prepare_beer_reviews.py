@@ -4,7 +4,7 @@ import json
 import logging
 from pathlib import Path
 from typing import List, Dict
-
+import csv 
 from datasets import load_dataset
 
 logger = logging.getLogger(__name__)
@@ -15,27 +15,6 @@ MAP_LABEL_TRANSLATION = {
       2: 'positive'
 }
 
-import csv 
-
-def csv_to_json(csvFilePath, jsonFilePath):
-    jsonArray = []
-    with open(csvFilePath, encoding='utf-8') as csvf: 
-        csvReader = csv.DictReader(csvf) 
-        for row in csvReader: 
-            jsonArray.append(row)
-    with open(jsonFilePath, 'w', encoding='utf-8') as jsonf: 
-        jsonString = json.dumps(jsonArray, indent=4)
-        jsonf.write(jsonString)
-          
-csvFilePath = r'training.csv'
-jsonFilePath = r'training.json'
-csv_to_json(csvFilePath, jsonFilePath)
-csvFilePath = r'validation.csv'
-jsonFilePath = r'validation.json'
-csv_to_json(csvFilePath, jsonFilePath)
-csvFilePath = r'production.csv'
-jsonFilePath = r'production.json'
-csv_to_json(csvFilePath, jsonFilePath)
 
 def save_as_translations(original_save_path: Path, data_to_save: List[Dict]) -> None:
     file_name = 's2s-' + original_save_path.name
@@ -54,11 +33,13 @@ def save_as_translations(original_save_path: Path, data_to_save: List[Dict]) -> 
 def main() -> None:
     loaded_data = load_dataset('arize-ai/beer_reviews_label_drift_neg')
     logger.info(f'Loaded dataset imdb: {loaded_data}')
-
+    loaded_data['training'] = loaded_data['training'].to_json('training.json')
+    loaded_data['validation'] = loaded_data['validation'].to_json('validation.json')
+    loaded_data['production'] = loaded_data['production'].to_json('production.json')
     save_path = Path('data/')
-    save_train_path = save_path / 'training.csv'
-    save_valid_path = save_path / 'validation.csv'
-    save_test_path = save_path / 'production.csv'
+    save_train_path = save_path / 'training.json'
+    save_valid_path = save_path / 'validation.json'
+    save_test_path = save_path / 'production.json'
     if not save_path.exists():
         save_path.mkdir()
 
@@ -79,21 +60,25 @@ def main() -> None:
     logger.info(f'Train: {len(data_train):6d}')
 
     # Split validation set into 2 classes for validation and test splitting
-    data_class_1, data_class_2 = [], []
+    data_class_1, data_class_2,data_class_3= [], [],[]
     for data in data_valid:
         label = data['label']
         if label == 0:
             data_class_1.append(data)
         elif label == 1:
             data_class_2.append(data)
+        elif label == 2:
+            data_class_3.append(data)
     logger.info(f'Label 1: {len(data_class_1):6d}')
     logger.info(f'Label 2: {len(data_class_2):6d}')
+    logger.info(f'Label 3: {len(data_class_3):6d}')
 
     # Split 2 classes into validation and test
-    size_half_class_1 = int(len(data_class_1) / 2)
-    size_half_class_2 = int(len(data_class_2) / 2)
-    data_valid = data_class_1[:size_half_class_1] + data_class_2[:size_half_class_2]
-    data_test = data_class_1[size_half_class_1:] + data_class_2[size_half_class_2:]
+    size_half_class_1 = int(len(data_class_1) / 3)
+    size_half_class_2 = int(len(data_class_2) / 3)
+    size_half_class_3 = int(len(data_class_3) / 3)
+    data_valid = data_class_1[:size_half_class_1] + data_class_2[:size_half_class_2]+data_class_3[:size_half_class_3]
+    data_test = data_class_1[size_half_class_1:] + data_class_2[size_half_class_2:]+data_class_3[:size_half_class_3]
     logger.info(f'Valid: {len(data_valid):6d}')
     logger.info(f'Test : {len(data_test):6d}')
 
@@ -113,4 +98,5 @@ def main() -> None:
 
 
 if __name__ == '__main__':
+    
     main()
