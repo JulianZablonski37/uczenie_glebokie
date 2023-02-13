@@ -32,11 +32,8 @@ def save_as_translations(original_save_path: Path, data_to_save: List[Dict]) -> 
 
 def main() -> None:
     loaded_data = load_dataset('arize-ai/beer_reviews_label_drift_neg')
-    logger.info(f'Loaded dataset imdb: {loaded_data}')
-    loaded_data['training'] = loaded_data['training'].to_json('training.json')
-    loaded_data['validation'] = loaded_data['validation'].to_json('validation.json')
-    loaded_data['production'] = loaded_data['production'].to_json('production.json')
-    save_path = Path('data/')
+    logger.info(f'Loaded dataset beer: {loaded_data}')
+    save_path = Path('datav2/')
     save_train_path = save_path / 'training.json'
     save_valid_path = save_path / 'validation.json'
     save_test_path = save_path / 'production.json'
@@ -47,7 +44,7 @@ def main() -> None:
     data_train, data_valid, data_test = [], [], []
     for source_data, dataset, max_size in [
         (loaded_data['training'], data_train, None),
-        (loaded_data['production'], data_valid, None)
+        (loaded_data['validation'], data_valid, None)
     ]:
         for i, data in enumerate(source_data):
             if max_size is not None and i >= max_size:
@@ -60,7 +57,7 @@ def main() -> None:
     logger.info(f'Train: {len(data_train):6d}')
 
     # Split validation set into 2 classes for validation and test splitting
-    data_class_1, data_class_2,data_class_3= [], [],[]
+    data_class_1, data_class_2, data_class_3= [], [],[]
     for data in data_valid:
         label = data['label']
         if label == 0:
@@ -78,7 +75,7 @@ def main() -> None:
     size_half_class_2 = int(len(data_class_2) / 3)
     size_half_class_3 = int(len(data_class_3) / 3)
     data_valid = data_class_1[:size_half_class_1] + data_class_2[:size_half_class_2]+data_class_3[:size_half_class_3]
-    data_test = data_class_1[size_half_class_1:] + data_class_2[size_half_class_2:]+data_class_3[:size_half_class_3]
+    data_test = data_class_1[size_half_class_1:] + data_class_2[size_half_class_2:]+data_class_3[size_half_class_3:]
     logger.info(f'Valid: {len(data_valid):6d}')
     logger.info(f'Test : {len(data_test):6d}')
 
