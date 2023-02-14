@@ -72,16 +72,16 @@ class GPT2ClassificationHeadCustom(nn.Module):
             hidden = torch.zeros(x.size(), dtype=x.dtype, device=x.device)
 
         x = self.dense_1_input(x)
-        x = torch.nn.LeakyReLU(x)
+        x = torch.relu(x)
         x = self.dropout(x)
 
         hidden = self.dense_1_hidden(hidden)
-        hidden = torch.nn.LeakyReLU(hidden)
+        hidden = torch.relu(hidden)
         hidden = self.dropout(hidden)
 
         x = torch.cat((x, hidden), dim=2)
         x = self.dense_2(x)
-        x = torch.nn.LeakyReLU(x)
+        x = torch.relu(x)
         x = self.dropout(x)
 
         x = self.out_proj(x)

@@ -413,6 +413,16 @@ def main():
         ignore_mismatched_sizes=model_args.ignore_mismatched_sizes,
     )
 
+    if model_args.model_name_or_path.startswith('roberta') or model_args.model_name_or_path.startswith('gpt2'):
+        for name, param in model.named_parameters():
+            if 'block' in name:
+                layer_number = name.split('.')[2]
+                if int(layer_number)%5 ==0:
+                    param.requires_grad = False
+        frozen_layer = [(name,param.requires_grad)for(name,param) in model.named_parameters()]
+        print("\n\n\n frozen Layer")
+        print(frozen_layer)
+
     if 'gpt2' in tokenizer.name_or_path and tokenizer.pad_token is None:
         logger.info(f'Set PAD token to EOS: {tokenizer.eos_token}')
         tokenizer._pad_token = tokenizer.eos_token
