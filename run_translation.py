@@ -64,7 +64,7 @@ logger = logging.getLogger(__name__)
 MULTILINGUAL_TOKENIZERS = [MBartTokenizer, MBartTokenizerFast, MBart50Tokenizer, MBart50TokenizerFast, M2M100Tokenizer]
 
 
-MAP_CLASSIFICATION_LABEL = {'positive': 1, 'negative': 0}
+MAP_CLASSIFICATION_LABEL = {'positive': 2,'neutral':1, 'negative': 0}
 
 
 @dataclass
