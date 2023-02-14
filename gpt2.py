@@ -11,47 +11,6 @@ from transformers.modeling_outputs import SequenceClassifierOutputWithPast
 logger = logging.getLogger(__name__)
 
 
-# Simple version #
-
-class GPT2ClassificationHeadCustomSimple(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        hidden_size = config.n_embd
-        self.dense_1 = nn.Linear(hidden_size, 2 * hidden_size)
-        self.dense_2 = nn.Linear(2 * hidden_size, hidden_size)
-        self.dropout = nn.Dropout(config.resid_pdrop)
-        self.out_proj = nn.Linear(hidden_size, config.num_labels, bias=False)
-
-    def forward(self, x):
-        x = self.dense_1(x)
-        x = torch.relu(x)
-        x = self.dropout(x)
-
-        x = self.dense_2(x)
-        x = torch.relu(x)
-        x = self.dropout(x)
-
-        x = self.out_proj(x)
-        return x
-
-
-class GPT2ForSequenceClassificationCustomSimple(GPT2ForSequenceClassification):
-    _keys_to_ignore_on_load_missing = [r"h\.\d+\.attn\.masked_bias", r"lm_head.weight"]
-
-    def __init__(self, config):
-        super().__init__(config)
-        self.num_labels = config.num_labels
-        self.transformer = GPT2Model(config)
-        self.score = GPT2ClassificationHeadCustomSimple(config)
-
-        # Model parallel
-        self.model_parallel = False
-        self.device_map = None
-
-        # Initialize weights and apply final processing
-        self.post_init()
-
-
 # Version with custom forward 1 #
 
 class GPT2ClassificationHeadCustom(nn.Module):
