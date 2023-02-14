@@ -99,11 +99,11 @@ class RobertaClassificationHeadCustom(nn.Module):
                 )
 
         x = self.dense_1(x)
-        x = torch.relu(x)
+        x = torch.nn.LeakyReLU(x)
         x = self.dropout(x)
 
         x = self.dense_2(x)
-        x = torch.relu(x)
+        x = torch.nn.LeakyReLU(x)
         x = self.dropout(x)
 
         x = self.out_proj(x)

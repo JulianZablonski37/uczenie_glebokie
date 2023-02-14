@@ -394,6 +394,14 @@ def main():
         use_auth_token=True if model_args.use_auth_token else None,
     )
 
+    if model_args.model_name_or_path.startswith('google/t5'):
+        for name, param in model.named_parameters():
+            if 'block' in name:
+                layer_number = name.split('.')[2]
+                if int(layer_number)%5 ==0:
+                    param.requires_grad = False
+        print("\n\n\n frozen Layer")
+        
     if model_args.freeze_weights:
         logger.info("Freezing encoder weights")
         freeze_model_weights(model.encoder)
