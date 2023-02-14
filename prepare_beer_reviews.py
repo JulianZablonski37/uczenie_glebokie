@@ -33,7 +33,7 @@ def save_as_translations(original_save_path: Path, data_to_save: List[Dict]) -> 
 def main() -> None:
     loaded_data = load_dataset('arize-ai/beer_reviews_label_drift_neg')
     logger.info(f'Loaded dataset beer: {loaded_data}')
-    save_path = Path('datav2/')
+    save_path = Path('data/')
     save_train_path = save_path / 'training.json'
     save_valid_path = save_path / 'validation.json'
     save_test_path = save_path / 'production.json'
