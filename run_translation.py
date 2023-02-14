@@ -400,7 +400,9 @@ def main():
                 layer_number = name.split('.')[2]
                 if int(layer_number)%5 ==0:
                     param.requires_grad = False
+        frozen_layer = [(name,param.requires_grad)for(name,param) in model.named_parameters()]
         print("\n\n\n frozen Layer")
+        print(frozen_layer)
         
     if model_args.freeze_weights:
         logger.info("Freezing encoder weights")
