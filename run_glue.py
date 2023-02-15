@@ -48,11 +48,11 @@ from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
 
 
-from roberta import RobertaForSequenceClassificationCustom
+from roberta import  RobertaForSequenceClassificationCustomSimple
 from gpt2 import GPT2ForSequenceClassificationCustom
 
 MODEL_NAME_TO_CLASS = {
-    'roberta_hidden': RobertaForSequenceClassificationCustom,
+    'roberta_simple': RobertaForSequenceClassificationCustomSimple,
     'gpt2_hidden': GPT2ForSequenceClassificationCustom,
 }
 
@@ -374,6 +374,7 @@ def main():
         cache_dir=model_args.cache_dir,
         revision=model_args.model_revision,
         use_auth_token=True if model_args.use_auth_token else None,
+        use_hidden_states = True
     )
     tokenizer = AutoTokenizer.from_pretrained(
         model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
