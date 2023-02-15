@@ -48,7 +48,7 @@ from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
 
 
-from roberta import RobertaForSequenceClassificationCustom,
+from roberta import RobertaForSequenceClassificationCustom
 from gpt2 import GPT2ForSequenceClassificationCustom
 
 MODEL_NAME_TO_CLASS = {
