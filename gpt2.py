@@ -9,12 +9,8 @@ from transformers.modeling_outputs import SequenceClassifierOutputWithPast
 
 
 logger = logging.getLogger(__name__)
-
-
-# Version with custom forward 1 #
-
 class GPT2ClassificationHeadCustom(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config,):
         super().__init__()
         hidden_size = config.n_embd
         self.dense_1_input = nn.Linear(hidden_size, 2 * hidden_size)
@@ -25,64 +21,60 @@ class GPT2ClassificationHeadCustom(nn.Module):
 
     def forward(self, x, **kwargs):
         if 'hidden_states' in kwargs and kwargs['hidden_states'] is not None:
-            # Get hidden states from second from the end
-            hidden = kwargs['hidden_states'][-2]
+            # Get hidden states from last layer
+            hidden = kwargs['hidden_states'][-1]
         else:
             hidden = torch.zeros(x.size(), dtype=x.dtype, device=x.device)
 
         x = self.dense_1_input(x)
-        x = torch.relu(x)
+        x = torch.rrelu(x)
         x = self.dropout(x)
 
         hidden = self.dense_1_hidden(hidden)
-        hidden = torch.relu(hidden)
+        hidden = torch.rrelu(hidden)
         hidden = self.dropout(hidden)
 
         x = torch.cat((x, hidden), dim=2)
         x = self.dense_2(x)
-        x = torch.relu(x)
+        x = torch.rrelu(x)
         x = self.dropout(x)
 
         x = self.out_proj(x)
         return x
 
-
 class GPT2ForSequenceClassificationCustom(GPT2ForSequenceClassification):
-    _keys_to_ignore_on_load_missing = [r"h\.\d+\.attn\.masked_bias", r"lm_head.weight"]
-
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
         self.transformer = GPT2Model(config)
         self.score = GPT2ClassificationHeadCustom(config)
 
+        self.init_weights()
+
         # Model parallel
         self.model_parallel = False
         self.device_map = None
 
-        # Initialize weights and apply final processing
-        self.post_init()
-
     def forward(
         self,
-        input_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        token_type_ids: Optional[torch.LongTensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        labels: Optional[torch.LongTensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ) -> Union[Tuple, SequenceClassifierOutputWithPast]:
+        input_ids=None,
+        past_key_values=None,
+        attention_mask=None,
+        token_type_ids=None,
+        position_ids=None,
+        head_mask=None,
+        inputs_embeds=None,
+        labels=None,
+        use_cache=None,
+        output_attentions=None,
+        output_hidden_states=None,
+        return_dict=None,
+    ):
         r"""
-        labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
-            Labels for computing the sequence classification/regression loss. Indices should be in `[0, ...,
-            config.num_labels - 1]`. If `config.num_labels == 1` a regression loss is computed (Mean-Square loss), If
-            `config.num_labels > 1` a classification loss is computed (Cross-Entropy).
+        labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size,)`, `optional`):
+            Labels for computing the sequence classification/regression loss. Indices should be in :obj:`[0, ...,
+            config.num_labels - 1]`. If :obj:`config.num_labels == 1` a regression loss is computed (Mean-Square loss),
+            If :obj:`config.num_labels > 1` a classification loss is computed (Cross-Entropy).
         """
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
@@ -96,11 +88,14 @@ class GPT2ForSequenceClassificationCustom(GPT2ForSequenceClassification):
             inputs_embeds=inputs_embeds,
             use_cache=use_cache,
             output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states or self.config.use_hidden_states,
+            output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
         hidden_states = transformer_outputs[0]
-        logits = self.score(hidden_states, hidden_states=transformer_outputs.hidden_states)
+        if return_dict:
+            logits = self.score(hidden_states, hidden_states=transformer_outputs.hidden_states)
+        else:
+            raise NotImplemented('Not implemented for using non-dictionary object')
 
         if input_ids is not None:
             batch_size, sequence_length = input_ids.shape[:2]
@@ -117,35 +112,19 @@ class GPT2ForSequenceClassificationCustom(GPT2ForSequenceClassification):
                 sequence_lengths = torch.ne(input_ids, self.config.pad_token_id).sum(-1) - 1
             else:
                 sequence_lengths = -1
-                logger.warning(
-                    f"{self.__class__.__name__} will not detect padding tokens in `inputs_embeds`. Results may be "
-                    "unexpected if using padding tokens in conjunction with `inputs_embeds.`"
-                )
 
-        pooled_logits = logits[torch.arange(batch_size, device=logits.device), sequence_lengths]
+        pooled_logits = logits[range(batch_size), sequence_lengths]
 
         loss = None
         if labels is not None:
-            if self.config.problem_type is None:
-                if self.num_labels == 1:
-                    self.config.problem_type = "regression"
-                elif self.num_labels > 1 and (labels.dtype == torch.long or labels.dtype == torch.int):
-                    self.config.problem_type = "single_label_classification"
-                else:
-                    self.config.problem_type = "multi_label_classification"
-
-            if self.config.problem_type == "regression":
+            if self.num_labels == 1:
+                #  We are doing regression
                 loss_fct = MSELoss()
-                if self.num_labels == 1:
-                    loss = loss_fct(pooled_logits.squeeze(), labels.squeeze())
-                else:
-                    loss = loss_fct(pooled_logits, labels)
-            elif self.config.problem_type == "single_label_classification":
+                loss = loss_fct(pooled_logits.view(-1), labels.to(self.dtype).view(-1))
+            else:
                 loss_fct = CrossEntropyLoss()
                 loss = loss_fct(pooled_logits.view(-1, self.num_labels), labels.view(-1))
-            elif self.config.problem_type == "multi_label_classification":
-                loss_fct = BCEWithLogitsLoss()
-                loss = loss_fct(pooled_logits, labels)
+
         if not return_dict:
             output = (pooled_logits,) + transformer_outputs[1:]
             return ((loss,) + output) if loss is not None else output
